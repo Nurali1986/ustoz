@@ -1,6 +1,8 @@
 /* Sozlamalar: aloqa ma'lumotlarini shu yerda o'zgartiring */
 const CONFIG = {
-  telegram: 'AXROLXUJA' // xabar shu Telegram profilga yuboriladi
+  // Google Apps Script veb-ilova havolasi (.../exec). Bo'sh bo'lsa, forma Telegram orqali ishlaydi.
+  sheetUrl: 'https://script.google.com/macros/s/AKfycbxsxJWuwxpLhK-Y_W2y9_cSaj9BfiPnkhq2Mk44-ecTe0Oq8bCznKmKyY--lGMR-KSTng/exec',
+  telegram: 'AXROLXUJA' // zaxira: Telegram profil
 };
 
 // Navigatsiya
@@ -75,14 +77,29 @@ function showToast(msg) {
 
 // Forma
 const form = document.getElementById('leadForm');
+const submitBtn = form.querySelector('button[type="submit"]');
+
+function telegramFallback(lines) {
+  let copied = false;
+  return (navigator.clipboard ? navigator.clipboard.writeText(lines).then(() => { copied = true; }) : Promise.resolve())
+    .catch(() => {})
+    .then(() => {
+      window.open(`https://t.me/${CONFIG.telegram}?text=${encodeURIComponent(lines)}`, '_blank', 'noopener');
+      showToast(copied
+        ? 'Xabar nusxalandi va Telegram ochildi — chatga joylashtirib yuboring.'
+        : 'Telegram ochildi — xabaringizni yozib yuboring.');
+    });
+}
+
 form.addEventListener('submit', async e => {
   e.preventDefault();
   const f = new FormData(form);
   const name = (f.get('name') || '').trim();
   const phone = (f.get('phone') || '').trim();
+  const phoneOk = phone.replace(/\D/g, '').length >= 9;
   form.name.classList.toggle('err', !name);
-  form.phone.classList.toggle('err', phone.replace(/\D/g, '').length < 9);
-  if (!name || phone.replace(/\D/g, '').length < 9) {
+  form.phone.classList.toggle('err', !phoneOk);
+  if (!name || !phoneOk) {
     showToast('Iltimos, ism va telefon raqamini to‘liq kiriting.');
     return;
   }
@@ -96,14 +113,23 @@ form.addEventListener('submit', async e => {
     f.get('msg') ? `Xabar: ${f.get('msg')}` : ''
   ].filter(Boolean).join('\n');
 
-  let copied = false;
-  try { await navigator.clipboard.writeText(lines); copied = true; } catch (_) {}
-  const url = `https://t.me/${CONFIG.telegram}?text=${encodeURIComponent(lines)}`;
-  window.open(url, '_blank', 'noopener');
-  showToast(copied
-    ? 'Xabar nusxalandi va Telegram ochildi — chatga joylashtirib yuboring.'
-    : 'Telegram ochildi — xabaringizni yozib yuboring.');
-  form.reset();
+  if (!CONFIG.sheetUrl) { await telegramFallback(lines); form.reset(); return; }
+
+  submitBtn.disabled = true;
+  const label = submitBtn.innerHTML;
+  submitBtn.innerHTML = 'Yuborilmoqda...';
+  try {
+    // Apps Script CORS javobini bermaydi, shuning uchun "no-cors" bilan yuboriladi
+    await fetch(CONFIG.sheetUrl, { method: 'POST', mode: 'no-cors', body: new URLSearchParams(f) });
+    showToast('Rahmat! Murojaatingiz qabul qilindi. Tez orada bog‘lanamiz.');
+    form.reset();
+  } catch (_) {
+    showToast('Internet bilan muammo. Telegram orqali yuboramiz.');
+    await telegramFallback(lines);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = label;
+  }
 });
 
 document.getElementById('yr').textContent = new Date().getFullYear();
